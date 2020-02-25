@@ -2,7 +2,7 @@ from rlbot.utils.game_state_util import GameState, Vector3
 from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
 from rlbot.utils.structures.game_data_struct import GameTickPacket
 
-from rlutilities.linear_algebra import euler_to_rotation, dot, transpose, look_at, vec3, norm, normalize, angle_between
+from rlutilities.linear_algebra import euler_to_rotation, dot, transpose, look_at, vec3, norm, normalize, angle_between, orthogonalize
 
 from policy import Policy
 from simulation import Simulation
@@ -44,6 +44,8 @@ class TestAgent(BaseAgent):
 
 		self.lastReset = 0
 		self.target = vec3(1, 0, 0)
+		self.up = vec3(0, 0, 1)
+		self.targetOrientation = look_at(self.target, self.up)
 
 
 	game_state = None
@@ -55,6 +57,8 @@ class TestAgent(BaseAgent):
 		if self.lastReset + 300 < self.currentTick:
 			self.lastReset = self.currentTick
 			self.target = vec3(2*random()-1, 2*random()-1, 2*random()-1)
+			self.up = orthogonalize(vec3(2*random()-1, 2*random()-1, 2*random()-1), self.target)
+			self.targetOrientation = look_at(self.target, self.up)
 
 		self.packet = packet
 		self.handleTime()
@@ -72,18 +76,17 @@ class TestAgent(BaseAgent):
 		car = packet.game_cars[self.index]
 		position = vec3(car.physics.location.x, car.physics.location.y, car.physics.location.z)
 
-		linePosition = position + 300 * normalize(self.target)
-		self.renderer.draw_line_3d(car.physics.location, linePosition, self.renderer.white())
+		self.renderer.draw_line_3d(car.physics.location, position + 300 * normalize(self.target), self.renderer.yellow())
+		self.renderer.draw_line_3d(car.physics.location, position + 300 * normalize(self.up), self.renderer.pink())
 
 		carOrientation = rotationToOrientation(car.physics.rotation)
-		targetOrientation = look_at(self.target, vec3(0, 0, 10))
 		ang = parseVector(car.physics.angular_velocity)
 		
 
-		print(angle_between(carOrientation, targetOrientation))
+		print(angle_between(carOrientation, self.targetOrientation))
 
-		o_rlu = dot(transpose(targetOrientation), carOrientation)
-		w_rlu = dot(transpose(targetOrientation), ang)
+		o_rlu = dot(transpose(self.targetOrientation), carOrientation)
+		w_rlu = dot(transpose(self.targetOrientation), ang)
 		o = torch.tensor([[o_rlu[i, j] for j in range(3)] for i in range(3)])[None, :].to(device)
 		w = torch.tensor([w_rlu[i] for i in range(3)])[None, :].to(device)
 
