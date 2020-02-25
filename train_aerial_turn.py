@@ -18,9 +18,9 @@ model_name = f'full_rotation_{hidden_size}_yeet_0.01'
 
 class Trainer:
     def __init__(self):
-        from mechanic.aerial_turn_ml.policy import Policy
-        from mechanic.aerial_turn_ml.simulation import Simulation
-        from mechanic.aerial_turn_ml.optimizer import Yeet, andt
+        from policy import Policy
+        from simulation import Simulation
+        from optimizer import Yeet, andt
 
         self.policy = Policy(hidden_size).to(device)
         self.simulation = Simulation(self.policy)

@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from torch.distributions.normal import Normal
 
-from mechanic.aerial_turn_ml.policy import Policy
+from policy import Policy
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -16,7 +16,7 @@ identity = torch.diag(torch.ones(3))[None, :, :].to(device)
 
 
 w_max = 5.5
-batch_size = 15000
+batch_size = 60000
 meps = 1 - 1e-5
 
 
