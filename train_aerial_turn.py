@@ -6,10 +6,10 @@ import math
 import torch
 from torch.optim.adadelta import Adadelta
 from quicktracer import trace
+from device import device
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-steps = 40
 delta_time = 1 / 30
+steps = int(round(1.33 / delta_time))
 hidden_size = 40
 load = True
 rotation_eps = 0.01
@@ -18,9 +18,9 @@ model_name = f'full_rotation_{hidden_size}_yeet_0.01'
 
 class Trainer:
     def __init__(self):
-        from mechanic.aerial_turn_ml.policy import Policy
-        from mechanic.aerial_turn_ml.simulation import Simulation
-        from mechanic.aerial_turn_ml.optimizer import Yeet, andt
+        from policy import Policy
+        from simulation import Simulation
+        from optimizer import Yeet, andt
 
         self.policy = Policy(hidden_size).to(device)
         self.simulation = Simulation(self.policy)
@@ -62,10 +62,11 @@ class Trainer:
 
         loss = reward.sum(1).mean(0).neg()
 
+        # average_reward = sum(reward[:, steps - 1]) / len(reward[:, steps - 1])
         # if average_reward.item() > self.max_reward:
         #     self.max_reward = average_reward.item()
-        #     torch.save(self.policy.state_dict(), f'{model_name}_{round(self.max_reward, 1)}.mdl')
-        #     torch.save(self.optimizer.state_dict(), f'{model_name}_{round(self.max_reward, 1)}.state')
+        #     torch.save(self.policy.state_dict(), f'out/{model_name}_{round(self.max_reward, 1)}.mdl')
+        #     torch.save(self.optimizer.state_dict(), f'out/{model_name}_{round(self.max_reward, 1)}.state')
 
         self.optimizer.zero_grad()
         loss.backward()
