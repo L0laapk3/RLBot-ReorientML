@@ -2,7 +2,7 @@ from rlbot.utils.game_state_util import GameState, Vector3
 from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
 from rlbot.utils.structures.game_data_struct import GameTickPacket
 
-from rlutilities.linear_algebra import euler_to_rotation, dot, transpose, look_at, vec3, norm, normalize
+from rlutilities.linear_algebra import euler_to_rotation, dot, transpose, look_at, vec3, norm, normalize, angle_between
 
 from policy import Policy
 from simulation import Simulation
@@ -10,6 +10,7 @@ import math
 
 import torch
 from device import device
+from random import random
 
 hidden_size = 40
 model_name = f'full_rotation_{hidden_size}_yeet_0.01'
@@ -41,11 +42,19 @@ class TestAgent(BaseAgent):
 		self.lastDodgePitch = 0
 		self.lastDodgeRoll = 0
 
+		self.lastReset = 0
+		self.target = vec3(1, 0, 0)
+
 
 	game_state = None
 
 	def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
 		self.renderer.begin_rendering()
+
+
+		if self.lastReset + 300 < self.currentTick:
+			self.lastReset = self.currentTick
+			self.target = vec3(2*random()-1, 2*random()-1, 2*random()-1)
 
 		self.packet = packet
 		self.handleTime()
@@ -63,16 +72,18 @@ class TestAgent(BaseAgent):
 		car = packet.game_cars[self.index]
 		position = vec3(car.physics.location.x, car.physics.location.y, car.physics.location.z)
 
-		target = vec3(10, 4, 7)
-		linePosition = position + 300 * normalize(target)
+		linePosition = position + 300 * normalize(self.target)
 		self.renderer.draw_line_3d(car.physics.location, linePosition, self.renderer.white())
 
 		carOrientation = rotationToOrientation(car.physics.rotation)
-		targetOrientation = look_at(target, vec3(0, 0, 10))
+		targetOrientation = look_at(self.target, vec3(0, 0, 10))
 		ang = parseVector(car.physics.angular_velocity)
+		
 
-		o_rlu = dot(transpose(carOrientation), targetOrientation)
-		w_rlu = dot(transpose(carOrientation), ang)
+		print(angle_between(carOrientation, targetOrientation))
+
+		o_rlu = dot(transpose(targetOrientation), carOrientation)
+		w_rlu = dot(transpose(targetOrientation), ang)
 		o = torch.tensor([[o_rlu[i, j] for j in range(3)] for i in range(3)])[None, :].to(device)
 		w = torch.tensor([w_rlu[i] for i in range(3)])[None, :].to(device)
 
@@ -99,9 +110,9 @@ class TestAgent(BaseAgent):
 			self.simulation.w_local()
 		)[0]
 
+		print(rpy)
 
 		self.controls.roll, self.controls.pitch, self.controls.yaw = rpy
-		print(rpy)
 
 		if self.simulation.error()[0].item() < 0.01:
 			self.frames_done += 1
@@ -161,3 +172,4 @@ def rotationToOrientation(rotation):
 		rotation.yaw,
 		rotation.roll 
 	))
+	
