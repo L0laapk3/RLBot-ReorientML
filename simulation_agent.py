@@ -3,6 +3,8 @@ from rlbot.agents.base_agent import BaseAgent, SimpleControllerState
 from rlbot.utils.structures.game_data_struct import GameTickPacket
 
 from rlutilities.linear_algebra import euler_to_rotation, dot, transpose, look_at, vec2, vec3, norm, normalize, angle_between, orthogonalize
+from rlutilities.simulation import Ball, Field, Game, Car
+from rlutilities.mechanics import ReorientML
 
 from policy import Policy
 from simulation import Simulation
@@ -11,12 +13,13 @@ import math
 import torch
 import gc
 from device import device
-from random import random
+from random import random, seed
 
 hidden_size = 32
 hidden_size_2 = 32
 model_name = f'2layer_{hidden_size}_{hidden_size_2}'
 model = torch.load(model_name + '.mdl')
+seed(0)
 
 class TestAgent(BaseAgent):
 	def __init__(self, name, team, index):
@@ -48,17 +51,38 @@ class TestAgent(BaseAgent):
 		self.target = vec3(1, 0, 0)
 		self.up = vec3(0, 0, 1)
 		self.targetOrientation = look_at(self.target, self.up)
+		self.lastDoneTick = 0
+		self.totalScore = 0
+		self.tests = 0
 
 		self.stage = 0
+
+
+		
+
+	def initialize_agent(self):
+		self.game = Game()
+		self.game.set_mode("soccar")
+		self.car = self.game.cars[self.index]
+		self.reorientML = ReorientML(self.car)
+
 
 
 	game_state = None
 
 	def get_output(self, packet: GameTickPacket) -> SimpleControllerState:
 		self.renderer.begin_rendering()
+		
+		self.game.read_game_information(packet, self.get_rigid_body_tick(), self.get_field_info())
 
 
-		if self.lastReset + 200 < self.currentTick:
+
+		if self.lastReset + 300 < self.currentTick:
+			if self.tests > 0:
+				score = min(300, self.currentTick - self.lastDoneTick)
+				self.totalScore += score
+				print(self.tests, score, round(self.totalScore / self.tests, 2))
+			self.tests += 1
 			self.lastReset = self.currentTick
 			self.target = vec3(2*random()-1, 2*random()-1, 2*random()-1)
 			self.up = orthogonalize(vec3(2*random()-1, 2*random()-1, 2*random()-1), self.target)
@@ -67,7 +91,7 @@ class TestAgent(BaseAgent):
 			self.set_game_state(GameState(cars={self.index: car_state}))
 			self.stage = 0
 			self.lastDodgeTick = -math.inf
-			print("TELEPORT TO GROUND")
+			# print("TELEPORT TO GROUND")
 			return self.controls
 		else:
 			car_state = CarState(physics=Physics(location=Vector3(0, 0, 400), velocity=Vector3(0, 0, 0)))
@@ -78,7 +102,7 @@ class TestAgent(BaseAgent):
 			self.stage += 1
 		if self.stage == 6:
 			self.dodgeDirection = normalize(vec2(0, 2*random()-1))
-			self.controls.jump = random() > 0.5
+			self.controls.jump = True#random() > 0.5
 			if self.controls.jump:
 				self.lastDodgeTick = self.currentTick
 
@@ -102,7 +126,8 @@ class TestAgent(BaseAgent):
 		ang = parseVector(car.physics.angular_velocity)
 		
 
-		# print(angle_between(carOrientation, self.targetOrientation))
+		if angle_between(carOrientation, self.targetOrientation) > 1 / 180 * math.pi:
+			self.lastDoneTick = self.currentTick
 
 		o_rlu = dot(transpose(self.targetOrientation), carOrientation)
 		w_rlu = dot(transpose(self.targetOrientation), ang)
@@ -142,16 +167,24 @@ class TestAgent(BaseAgent):
 		self.simulation.dodgeTime = dodgeTime
 		self.simulation.dodgeDirection = dodgeDirection
 
-		rpy = self.policy(
-			self.simulation.o.permute(0, 2, 1),
-			self.simulation.w_local(),
-			self.simulation.noPitchTime,
-			self.simulation.dodgeTime,
-			self.simulation.dodgeDirection
-		)[0]
-		# print(rpy)
 
-		self.controls.roll, self.controls.pitch, self.controls.yaw = rpy
+
+		if True:
+
+			rpy = self.policy(
+				self.simulation.o.permute(0, 2, 1),
+				self.simulation.w_local(),
+				self.simulation.noPitchTime,
+				self.simulation.dodgeTime,
+				self.simulation.dodgeDirection
+			)[0]
+			self.controls.roll, self.controls.pitch, self.controls.yaw = rpy
+		
+		else:
+
+			self.reorientML.target_orientation = self.targetOrientation
+			self.reorientML.step(1/self.FPS)
+			self.controls.roll, self.controls.pitch, self.controls.yaw = self.reorientML.controls.roll, self.reorientML.controls.pitch, self.reorientML.controls.yaw
 
 		if self.simulation.error()[0].item() < 0.01:
 			self.frames_done += 1
