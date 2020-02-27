@@ -4,21 +4,22 @@ from torch.nn import Module, Linear, ReLU
 import sys
 
 class Actor(Module):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size, hidden_size_2):
         super().__init__()
         self.linear1 = Linear(16, hidden_size)
-        self.linear2 = Linear(hidden_size, 3)
+        self.linear2 = Linear(hidden_size, hidden_size_2)
+        self.linear3 = Linear(hidden_size_2, 3)
         self.softsign = ReLU()
 
     def forward(self, o: Tensor, w: Tensor, noPitchTime: Tensor, dodgeTime: Tensor, dodgeDirection: Tensor):
         flat_data = torch.cat((o.flatten(1, 2), w, noPitchTime[:, None], dodgeTime[:, None], dodgeDirection), 1)
-        return self.linear2(self.softsign(self.linear1(flat_data)))
+        return self.linear3(self.softsign(self.linear2(self.softsign(self.linear1(flat_data)))))
 
 
 class Policy(Module):
-    def __init__(self, hidden_size):
+    def __init__(self, hidden_size, hidden_size_2):
         super().__init__()
-        self.actor = Actor(hidden_size)
+        self.actor = Actor(hidden_size, hidden_size_2)
         self.symmetry = True
 
     def forward(self, o: Tensor, w: Tensor, noPitchTime: Tensor, dodgeTime: Tensor, dodgeDirection: Tensor):

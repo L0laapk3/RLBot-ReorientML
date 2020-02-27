@@ -1,6 +1,7 @@
 import torch
 from torch import Tensor
 from torch.distributions.normal import Normal
+import gc
 
 from policy import Policy
 from device import device
@@ -10,12 +11,12 @@ j = 10.5
 
 # air control torque coefficients
 t = torch.tensor([-400.0, -130.0, 95.0], dtype=torch.float, device=device)
-m = torch.diag(torch.ones(3)).byte().to(device)
-identity = torch.diag(torch.ones(3))[None, :, :].to(device)
+m = torch.diag(torch.ones(3)).bool().to(device)
+identity = torch.diag(torch.ones(3)).float()[None, :, :].to(device)
 
 
 w_max = 5.5
-batch_size = 60000
+batch_size = 5000
 meps = 1 - 1e-5
 
 
@@ -38,12 +39,19 @@ class Simulation:
         self.w = self.w / torch.norm(self.w, dim=1, keepdim=True)
         self.w = self.w * torch.rand((batch_size, 1), device=device) * w_max
 
-        willDodge = torch.randint(2, (batch_size,), device=device).float() # 50% chance to not contain a dodge at all
-        self.noPitchTime = willDodge * torch.randint(1, int(round(.95*120))+1, (batch_size,)).to(device).float() / 120
-        self.dodgeTime = willDodge * (self.noPitchTime - .3).clamp_max(0)
+        willDodge = torch.randint(2, (batch_size,), device=device)
+        self.noPitchTime = (willDodge == 1) * .95
+                        # (willDodge == 1) * torch.randint(1, int(round(.95*120))+1, (batch_size,)).to(device).float() / 120
+        # self.noPitchTime = torch.ones((batch_size, ), device=device) * 0.95
+        self.dodgeTime = (self.noPitchTime - .3).clamp(min=0)
+
+        dodgeMode = torch.randint(4, (batch_size,), device=device)
         self.dodgeDirection = Normal(0, 1).sample((batch_size, 2)).to(device)   # roll pitch
         self.dodgeDirection /= torch.norm(self.dodgeDirection, dim=1, keepdim=True)
-        self.dodgeDirection *= self.dodgeTime.clamp_min(1)[:, None]
+        self.dodgeDirection[:, 0] = self.dodgeDirection[:, 0] * (dodgeMode >= 2) + (dodgeMode == 0) * self.dodgeDirection[:, 0].sign()
+        self.dodgeDirection[:, 1] = self.dodgeDirection[:, 1] * (dodgeMode >= 2) + (dodgeMode == 1) * self.dodgeDirection[:, 1].sign()
+        self.dodgeDirection *= (self.dodgeTime > 0.01/120)[:, None]
+        # profile()
 
     def simulate(self, steps: int, dt: float):
         for _ in range(steps):
@@ -68,9 +76,9 @@ class Simulation:
         angularAcc[:, 1] *= self.noPitchTime < 0.01/120
 
         dodge = self.dodgeTime > 0.01/120
-        cancel = 1 - (rpy[:, 1] * -self.dodgeDirection[:, 1].sign()).clamp_min(0)
-        angularAcc[:, 0] += self.dodgeDirection[:, 0] * dodge
-        angularAcc[:, 1] += self.dodgeDirection[:, 1] * dodge * cancel
+        cancel = 1 - (rpy[:, 1] * -self.dodgeDirection[:, 1].sign()).clamp(min=0)
+        angularAcc[:, 0] += self.dodgeDirection[:, 0] * 260 * dodge
+        angularAcc[:, 1] += self.dodgeDirection[:, 1] * 224 * dodge * cancel
 
         self.w = self.w + torch.sum(self.o * (angularAcc + h * w_local)[:, None, :], 2) * (dt / j)
         self.o = torch.sum(self.o[:, None, :, :] * axis_to_rotation(self.w * dt)[:, :, :, None], 2)
@@ -78,12 +86,13 @@ class Simulation:
         self.w = self.w / torch.clamp_min(torch.norm(self.w, dim=1) / w_max, 1)[:, None]
 
         self.noPitchTime -= dt
-        self.noPitchTime.clamp_max_(0)
+        self.noPitchTime.clamp_(min=0)
         self.dodgeTime -= dt
-        self.dodgeTime.clamp_max_(0)
-        self.dodgeDirection *= self.dodgeTime.clamp_min(1)[:, None]
+        self.dodgeTime.clamp_(min=0)
+        self.dodgeDirection *= (self.dodgeTime > 0.01/120)[:, None]
 
     def error(self):
+        torch.sum(self.o[:, :, None, :] * identity[:, None, :, :], 3)[:, m]
         return torch.acos(meps * 0.5 * (torch.sum(torch.sum(self.o[:, :, None, :] *
                                                             identity[:, None, :, :], 3)[:, m], 1) - 1.0))
 
@@ -103,3 +112,25 @@ def axis_to_rotation(omega: Tensor):
                           u[:, None, :].repeat(1, 3, 1), dim=2)
 
     return result
+
+
+
+
+
+
+
+
+
+
+
+
+def profile():
+    print("----------------------------------------")
+    print("PROFILING")
+    print("----------------------------------------")
+    for obj in gc.get_objects():
+        try:
+            if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+                print(type(obj), obj.size())
+        except:
+            pass
